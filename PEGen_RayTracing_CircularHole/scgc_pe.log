@@ -1,0 +1,34 @@
+############ Collimator 0 ############
+Number of collimator holes = 1865
+Width of collimator layer(X direction) = 200mm
+Thickness of collimator layer(Y direction) = 5mm
+Height of collimator layer(Z direction) = 150mm
+Collimator Layer to 1st Collimator Layer = 0mm
+Total Coeff of collimator layer = 1
+Photon-electric Coeff of collimator layer = 0.8
+Compton Coeff of collimator layer = 0.2
+FOV center to 1st Collimator = 30
+FOV dimension : 160 160 1
+FOV Voxel Size(mm) : 1.000000 1.000000 1.000000
+########################
+Rotation (0) processing ...
+########################
+Shift FOV in X = 0mm
+Shift FOV in Y = 0mm
+Shift FOV in Z = 0mm
+Get into PESysMatGen
+Device 0 has compute capability 8.6.
+Device 1 has compute capability 8.6.
+Device 2 has compute capability 8.6.
+Set Device to Device 0
+########################
+numProjectionSingle = 5632
+numImagebin = 25600
+gridSize.x = 352
+gridSize.y = 800
+########################
+########################
+numImagebin = 25600
+########################
+Photon Electric Sysmat Written.
+########################
