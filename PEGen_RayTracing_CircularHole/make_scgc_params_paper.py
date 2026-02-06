@@ -3,51 +3,78 @@ import numpy as np
 import math
 
 # ============================================================
-# Paper constants (from your pasted text)
+# Paper-aligned SCGC geometry (as described in the paper)
 # ============================================================
+# System envelope: 200 mm × 150 mm × 150 mm
+# Coded-aperture: 12.5% open ratio, 1.6 mm diameter circular holes, random distribution
+# Detectors:
+#   L1-L3: 32×16, each crystal 3×3×6 mm (paper says x,y,z)
+#   L4   : 64×64, each crystal 2×2×6 mm
+#
+# IMPORTANT: Repo conventions (README)
+# - Param_Collimator[0] = numLayers
+# - layer params are at [layer_id*10 + 0..7] BUT many codes assume layer0 starts at 10.
+#   README says layer uses id*10; implementation often uses layer_id=1 offset.
+#   To be safe with THIS repo (matches your successful run), we store layer0 at index 10.
+# - Holes start at index 100, stride 9
+# - Param_Detector[0] = numDetectorBins, then stride 12 starting at index 1
+# - Param_Image has 12 floats
+# - Param_Physics has 10 floats
+#
+# Coordinate choice (works with this repo in practice):
+# - Put collimator plate spanning y in [0, PLATE_THICK]
+# - Put detectors at positive y behind the plate
+# - Put FOV in front of plate: FOV2Collimator0 > 0 (repo prints it directly)
+# ============================================================
+
+# ---------- Physics (paper) ----------
 E_LOW, E_HIGH = 112.0, 168.0
 E_TARGET = 140.0
-ENERGY_RES = 0.20  # 20% at 140 keV
+ENERGY_RES = 0.20  # 20% @ 140 keV
 
-# System outer size is 200 x 150 x 150 mm (paper). Only XY face explicitly used for plate.
-PLATE_W_X = 200.0  # mm
-PLATE_H_Z = 150.0  # mm
-HOLE_DIAM = 1.6    # mm
-OPEN_FRAC = 0.125  # 12.5%
+# ---------- Plate (paper) ----------
+PLATE_W_X = 200.0
+PLATE_H_Z = 150.0
+HOLE_DIAM = 1.6
+OPEN_FRAC = 0.125
 
-# Plate thickness is NOT explicitly stated in your excerpt.
-# The dataset varies 1..10 mm; many people use ~5 mm as nominal.
-PLATE_THICK = 5.0  # mm (override if you later confirm from Fig.1 / table)
+# Plate thickness is NOT explicitly in your pasted excerpt.
+# Paper dataset spans 1..10 mm. If you don’t know, keep 5 mm (reasonable mid).
+PLATE_THICK = 5.0
 
-# Detector mosaic counts (paper)
+# ---------- Detector crystals (paper) ----------
 L123_NX, L123_NZ = 32, 16
-L4_NX,   L4_NZ   = 64, 64
+L123_SIZE = (3.0, 3.0, 6.0)  # x,y,z (mm)
+L4_NX, L4_NZ = 64, 64
+L4_SIZE = (2.0, 2.0, 6.0)
 
-# Paper detector sizes (interpretation for this repo):
-# Paper gives 3(x) x 3(y) x 6(z). In imaging hardware, the 6mm is thickness/depth.
-# Repo expects: width=X, thickness=Y, height=Z.
-L123_WX, L123_TY, L123_HZ = 3.0, 6.0, 3.0
-L4_WX,   L4_TY,   L4_HZ   = 2.0, 6.0, 2.0
+# Pitch: paper calls it "mosaic structure" / "densely arranged"
+# Most likely pitch == crystal size in X and Z (no gaps).
+L123_PITCH_X, L123_PITCH_Z = 3.0, 6.0
+L4_PITCH_X,   L4_PITCH_Z   = 2.0, 6.0
 
-# Assume mosaic pitch equals in-plane size (no gap). If you later find gap/pitch in paper, change.
-L123_PITCH_X, L123_PITCH_Z = 3.0, 3.0
-L4_PITCH_X,   L4_PITCH_Z   = 2.0, 2.0
+# ---------- FOV ----------
+# Repo GPUPTS eval uses 2D plane: 160×160 with 1mm pixels.
+# Paper TL uses 3D: 160×160×160, but this repo’s PE sysmat path is typically 2D.
+FOV_NX, FOV_NY, FOV_NZ = 160, 160, 1
+VOX = (1.0, 1.0, 1.0)
 
-# FOV (paper: 16cm cube, 1mm voxel)
-FOV_NX, FOV_NY, FOV_NZ = 160, 160, 160
-VOX_X, VOX_Y, VOX_Z = 1.0, 1.0, 1.0
+# Distance from FOV plane to camera surface spans 30..230 mm in paper.
+# Here, this field is "FOV2Collimator0(mm)" in README.
+FOV2COLL0 = 30.0  # mm (start with 30 mm)
 
-# Distance to camera surface in paper spans 30..230mm.
-# Repo Param_Image[11] prints "FOV center to 1st Collimator".
-# Use 30 mm nominal (matches paper mention and your run output).
-FOV2COLL0 = 30.0
-
-# Layer spacings are NOT explicitly stated in your excerpt.
-# Keep tight but configurable defaults (mm). If you later get exact distances from Fig 1(b), update these.
+# Detector placement gaps (paper does not give exact internals in the excerpt)
+# Keep small + configurable-like defaults; change if you later locate Fig/table with true gaps.
 GAP_PLATE_TO_L1 = 2.0
 GAP_L1_TO_L2    = 2.0
 GAP_L2_TO_L3    = 2.0
 GAP_L3_TO_L4    = 2.0
+
+# ---------- Attenuation coefficients ----------
+# If you don’t have material coefficients, keep placeholders.
+# They affect physics but should not crash. (Crashes are almost always buffer/shape mismatches.)
+MU_COL_TOT, MU_COL_PE, MU_COL_C = 1.0, 0.8, 0.2
+MU_DET_TOT, MU_DET_PE, MU_DET_C = 1.0, 0.8, 0.2
 
 # ============================================================
 # Helpers
@@ -57,197 +84,155 @@ def write_f32(path, arr):
     with open(path, "wb") as f:
         f.write(arr.tobytes())
 
-def poissonish_holes(width, height, radius, target_n, seed=0, min_sep=None, edge_margin=None):
-    """
-    Fast rejection w/ grid accel.
-    Returns (N,2) array of (x,z).
-    """
-    rng = np.random.default_rng(seed)
-    if min_sep is None:
-        min_sep = 2.0 * radius * 1.05
-    if edge_margin is None:
-        edge_margin = radius
+def gen_random_holes(seed=0):
+    import random
+    random.seed(seed)
 
-    x_min = -width/2 + edge_margin
-    x_max =  width/2 - edge_margin
-    z_min = -height/2 + edge_margin
-    z_max =  height/2 - edge_margin
+    hole_r = HOLE_DIAM / 2.0
+    plate_area = PLATE_W_X * PLATE_H_Z
+    hole_area = math.pi * hole_r * hole_r
+    num_holes_target = int(round((OPEN_FRAC * plate_area) / hole_area))
 
-    cell = min_sep / math.sqrt(2.0)
-    grid = {}
-    pts = []
-    min_sep2 = min_sep * min_sep
-    max_attempts = 5_000_000
-    attempts = 0
+    holes = []
+    max_tries = 2_000_000
+    min_sep = HOLE_DIAM * 1.05  # mild non-overlap
 
-    def cell_key(x,z):
-        return (int(math.floor(x / cell)), int(math.floor(z / cell)))
-
-    while len(pts) < target_n and attempts < max_attempts:
-        attempts += 1
-        x = rng.uniform(x_min, x_max)
-        z = rng.uniform(z_min, z_max)
-        ck = cell_key(x,z)
+    tries = 0
+    while len(holes) < num_holes_target and tries < max_tries:
+        tries += 1
+        x = random.uniform(-PLATE_W_X/2 + hole_r, PLATE_W_X/2 - hole_r)
+        z = random.uniform(-PLATE_H_Z/2 + hole_r, PLATE_H_Z/2 - hole_r)
 
         ok = True
-        for dx in (-1,0,1):
-            for dz in (-1,0,1):
-                nk = (ck[0]+dx, ck[1]+dz)
-                if nk not in grid:
-                    continue
-                for (px,pz) in grid[nk]:
-                    if (x-px)*(x-px) + (z-pz)*(z-pz) < min_sep2:
-                        ok = False
-                        break
-                if not ok:
-                    break
-            if not ok:
+        # cheap local check (last few only) to avoid O(N^2) blowup
+        for (x2, z2) in holes[-250:]:
+            if (x-x2)**2 + (z-z2)**2 < (min_sep**2):
+                ok = False
                 break
-
         if ok:
-            pts.append((x,z))
-            grid.setdefault(ck, []).append((x,z))
+            holes.append((x, z))
 
-    return np.array(pts, dtype=np.float32)
+    if len(holes) < num_holes_target:
+        print(f"[WARN] placed {len(holes)}/{num_holes_target} holes (increase max_tries if you care).")
+
+    return holes
+
+def add_detector_layer(det_entries, nx, nz, size_xyz, pitch_x, pitch_z, y_center):
+    sx, sy, sz = size_xyz
+    for iz in range(nz):
+        for ix in range(nx):
+            x = (ix - (nx - 1)/2) * pitch_x
+            z = (iz - (nz - 1)/2) * pitch_z
+            det_entries.append([
+                x, y_center, z,
+                sx, sy, sz,
+                MU_DET_TOT, MU_DET_PE, MU_DET_C,
+                ENERGY_RES,
+                0.0,   # rotation angle
+                1.0    # flag
+            ])
 
 # ============================================================
 # Build Param_Image.dat (12 floats)
 # ============================================================
-param_image = np.array([
-    float(FOV_NX), float(FOV_NY), float(FOV_NZ),
-    float(VOX_X),  float(VOX_Y),  float(VOX_Z),
-    1.0,           0.0,           # numRotation=1, anglePerRotation=0
-    0.0, 0.0, 0.0,                 # shifts
-    float(FOV2COLL0)
+img = np.array([
+    FOV_NX, FOV_NY, FOV_NZ,
+    VOX[0], VOX[1], VOX[2],
+    1.0, 0.0,     # numRotation, anglePerRotation (keep 0 if only 1 rot)
+    0.0, 0.0, 0.0,
+    float(FOV2COLL0),
 ], dtype=np.float32)
-write_f32("Param_Image.dat", param_image)
+write_f32("Param_Image.dat", img)
 
 # ============================================================
-# Build Param_Physics.dat (>=10 floats)
+# Build Param_Physics.dat (10 floats)
 # ============================================================
-param_physics = np.array([
-    0.0,   # flagUsingCompton (PE module ignores it; keep 0 here)
-    1.0,   # flagSavingPESysmat
-    0.0,   # flagSavingComptonSysmat
-    0.0,   # flagSavingPEComptonSysmat
-    1.0,   # flagUsingSameEnergyWindow
-    float(E_LOW), float(E_HIGH),
-    float(E_TARGET),
-    0.0,   # flagCalculateCrystalGeometryRelationship
-    0.0    # flagCalculateCollimatorGeometryRelationship
+phy = np.array([
+    0.0,   # flagUsingCompton (PE module)
+    1.0,   # save PE
+    0.0,   # save Compton
+    0.0,   # save sum
+    1.0,   # same energy window
+    E_LOW, E_HIGH,
+    E_TARGET,
+    0.0, 0.0
 ], dtype=np.float32)
-write_f32("Param_Physics.dat", param_physics)
+write_f32("Param_Physics.dat", phy)
 
 # ============================================================
 # Build Param_Collimator.dat
-# Layout per README:
-# col[0] = numLayers
-# layer params at id*10 (id=0 => indices 0..9, but index0 is numLayers)
-# holes at 100 + hid*9
-#
-# IMPORTANT: We will store layer0 parameters starting at index 10 (id=1*10),
-# to avoid clobbering col[0]. This matches how most users succeed with this repo.
 # ============================================================
-hole_r = HOLE_DIAM / 2.0
-plate_area = PLATE_W_X * PLATE_H_Z
-hole_area = math.pi * hole_r * hole_r
-target_holes = int(round(OPEN_FRAC * plate_area / hole_area))
+holes = gen_random_holes(seed=0)
+num_holes = len(holes)
 
-holes = poissonish_holes(
-    width=PLATE_W_X,
-    height=PLATE_H_Z,
-    radius=hole_r,
-    target_n=target_holes,
-    seed=0,
-    min_sep=HOLE_DIAM * 1.05,
-    edge_margin=hole_r
-)
-num_holes = int(holes.shape[0])
-
-# allocate
-ncol = 100 + num_holes*9 + 32
+# Storage length: must be large enough; repo reads 80000 floats anyway.
+# But we still write a compact file (safe).
+ncol = 100 + num_holes * 9 + 64
 col = np.zeros(ncol, dtype=np.float32)
 
-col[0] = 1.0  # one plate layer
+col[0] = 1.0  # num layers
 
+# THIS repo behaves correctly when layer0 starts at index 10
 layer0 = 10
-col[layer0+0] = float(num_holes)
-col[layer0+1] = float(PLATE_W_X)
-col[layer0+2] = float(PLATE_THICK)
-col[layer0+3] = float(PLATE_H_Z)
-col[layer0+4] = 0.0
+col[layer0 + 0] = float(num_holes)
+col[layer0 + 1] = float(PLATE_W_X)
+col[layer0 + 2] = float(PLATE_THICK)
+col[layer0 + 3] = float(PLATE_H_Z)
+col[layer0 + 4] = 0.0
+col[layer0 + 5] = float(MU_COL_TOT)
+col[layer0 + 6] = float(MU_COL_PE)
+col[layer0 + 7] = float(MU_COL_C)
 
-# NOTE: the repo expects attenuation coefficients; paper doesn't list numbers in excerpt.
-# Use placeholders that keep math stable. Replace later if you have mu values.
-col[layer0+5] = 1.0
-col[layer0+6] = 0.8
-col[layer0+7] = 0.2
-
-# Plate is at y in [0, PLATE_THICK] and "Y of 1st collimator = 0" (repo note).
+# Plate spans y in [0, PLATE_THICK]
 y1 = 0.0
-y2 = PLATE_THICK
+y2 = float(PLATE_THICK)
+hole_r = HOLE_DIAM / 2.0
 
-for hid, (x,z) in enumerate(holes):
-    off = 100 + hid*9
-    col[off+0] = float(x)
-    col[off+1] = float(y1)
-    col[off+2] = float(y2)
-    col[off+3] = float(z)
-    col[off+4] = float(hole_r)
-    col[off+5] = 0.0
-    col[off+6] = 0.0
-    col[off+7] = 0.0
-    col[off+8] = 1.0
+for hid, (x, z) in enumerate(holes):
+    off = 100 + hid * 9
+    col[off + 0] = float(x)
+    col[off + 1] = y1
+    col[off + 2] = y2
+    col[off + 3] = float(z)
+    col[off + 4] = float(hole_r)
+    col[off + 5] = 0.0
+    col[off + 6] = 0.0
+    col[off + 7] = 0.0
+    col[off + 8] = 1.0
 
 write_f32("Param_Collimator.dat", col)
 
 # ============================================================
 # Build Param_Detector.dat
-# det[0] = numDetectorBins
-# per det: 12 floats at base=1+i*12:
-# x,y,z, widthX, thicknessY, heightZ, muTot, muPE, muC, energyRes, rotAngle, flag
 # ============================================================
 det_entries = []
 
-def add_layer(nx, nz, pitch_x, pitch_z, wx, ty, hz, y_center):
-    x0 = -(nx - 1) * pitch_x / 2.0
-    z0 = -(nz - 1) * pitch_z / 2.0
-    for iz in range(nz):
-        for ix in range(nx):
-            x = x0 + ix * pitch_x
-            z = z0 + iz * pitch_z
-            det_entries.append([
-                x, y_center, z,
-                wx, ty, hz,
-                1.0, 0.8, 0.2,   # placeholder mu values
-                ENERGY_RES,
-                0.0,
-                1.0
-            ])
+# Place detector layers behind plate (+y)
+# y_center = plate back face + gap + half thickness (y size)
+plate_back = PLATE_THICK
 
-# Place layers behind the plate (positive Y)
-# Plate back face at y=PLATE_THICK.
-y_l1 = PLATE_THICK + GAP_PLATE_TO_L1 + L123_TY/2.0
-y_l2 = y_l1 + L123_TY/2.0 + GAP_L1_TO_L2 + L123_TY/2.0
-y_l3 = y_l2 + L123_TY/2.0 + GAP_L2_TO_L3 + L123_TY/2.0
-y_l4 = y_l3 + L123_TY/2.0 + GAP_L3_TO_L4 + L4_TY/2.0
+y_l1 = plate_back + GAP_PLATE_TO_L1 + L123_SIZE[1]/2
+y_l2 = y_l1 + L123_SIZE[1]/2 + GAP_L1_TO_L2 + L123_SIZE[1]/2
+y_l3 = y_l2 + L123_SIZE[1]/2 + GAP_L2_TO_L3 + L123_SIZE[1]/2
+y_l4 = y_l3 + L123_SIZE[1]/2 + GAP_L3_TO_L4 + L4_SIZE[1]/2
 
-add_layer(L123_NX, L123_NZ, L123_PITCH_X, L123_PITCH_Z, L123_WX, L123_TY, L123_HZ, y_l1)
-add_layer(L123_NX, L123_NZ, L123_PITCH_X, L123_PITCH_Z, L123_WX, L123_TY, L123_HZ, y_l2)
-add_layer(L123_NX, L123_NZ, L123_PITCH_X, L123_PITCH_Z, L123_WX, L123_TY, L123_HZ, y_l3)
-add_layer(L4_NX,   L4_NZ,   L4_PITCH_X,   L4_PITCH_Z,   L4_WX,   L4_TY,   L4_HZ,   y_l4)
+add_detector_layer(det_entries, L123_NX, L123_NZ, L123_SIZE, L123_PITCH_X, L123_PITCH_Z, y_l1)
+add_detector_layer(det_entries, L123_NX, L123_NZ, L123_SIZE, L123_PITCH_X, L123_PITCH_Z, y_l2)
+add_detector_layer(det_entries, L123_NX, L123_NZ, L123_SIZE, L123_PITCH_X, L123_PITCH_Z, y_l3)
+add_detector_layer(det_entries, L4_NX,   L4_NZ,   L4_SIZE,   L4_PITCH_X,   L4_PITCH_Z,   y_l4)
 
 num_det = len(det_entries)
-det = np.zeros(1 + 12*num_det, dtype=np.float32)
+det = np.zeros(1 + 12 * num_det, dtype=np.float32)
 det[0] = float(num_det)
+
 for i, row in enumerate(det_entries):
-    base = 1 + i*12
+    base = 1 + i * 12
     det[base:base+12] = np.asarray(row, dtype=np.float32)
 
 write_f32("Param_Detector.dat", det)
 
-print("WROTE Param_*.dat")
-print("holes:", num_holes)
-print("detBins:", num_det)
-print("FOV:", f"{FOV_NX}x{FOV_NY}x{FOV_NZ} (voxels={FOV_NX*FOV_NY*FOV_NZ})")
-print("NOTE: L123 mapped as width=3, thickness=6, height=3 to match paper depth=6mm.")
+print("Wrote Param_*.dat")
+print(f"  holes: {num_holes}")
+print(f"  detectors: {num_det}")
+print(f"  FOV: {FOV_NX}×{FOV_NY}×{FOV_NZ}")
+print(f"  FOV2Collimator0: {FOV2COLL0} mm")
