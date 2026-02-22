@@ -1,0 +1,227 @@
+{
+  "_comment": "VALID JSON (no // comments). Every variable has a _comment_* field explaining meaning/units. Converter ignores all keys starting with _comment.",
+
+  "collimator": {
+    "_comment": "Collimator geometry and material. Written into Param_Collimator.dat as float32 array.",
+    "_comment_layers": "Array of collimator layers. Order is from closest to FOV outward (layer 0 first).",
+
+    "layers": [
+      {
+        "_comment": "Layer 0 example (closest to FOV).",
+        "_comment_hole_count": "Number of holes in this layer. Must equal holes.length.",
+        "hole_count": 4,
+
+        "_comment_width_mm": "Layer width in mm (X dimension).",
+        "width_mm": 60.0,
+
+        "_comment_thickness_mm": "Layer thickness in mm (Y or beam direction, depending on model).",
+        "thickness_mm": 5.0,
+
+        "_comment_height_mm": "Layer height in mm (Z dimension).",
+        "height_mm": 60.0,
+
+        "_comment_offset_from_layer0_mm": "Distance from layer 0 to this layer in mm. For layer 0, use 0.0.",
+        "offset_from_layer0_mm": 0.0,
+
+        "_comment_mu_total": "Total linear attenuation coefficient for collimator material (same unit system used by code; typically 1/mm). Excludes Rayleigh per repo note.",
+        "mu_total": 0.15,
+
+        "_comment_mu_pe": "Photoelectric attenuation coefficient for collimator material (typically 1/mm).",
+        "mu_pe": 0.10,
+
+        "_comment_mu_compton": "Compton attenuation coefficient for collimator material (typically 1/mm).",
+        "mu_compton": 0.05,
+
+        "_comment_holes": "List of holes in this layer. Flattened into Param_Collimator.dat hole table starting at float index 100 (9 floats per hole).",
+
+        "holes": [
+          {
+            "_comment": "Hole 0 example. cx,cz define center. cy1 and cy2 exist in repo format; set equal if you don't model slanted/variable Y center.",
+            "_comment_cx": "Hole center X coordinate (mm).",
+            "cx": -5.0,
+
+            "_comment_cy1": "Hole center Y1 (mm). Repo expects two Y values; if not modeling a tilt, set cy1 = cy2.",
+            "cy1": 0.0,
+
+            "_comment_cy2": "Hole center Y2 (mm). Same note as cy1.",
+            "cy2": 0.0,
+
+            "_comment_cz": "Hole center Z coordinate (mm).",
+            "cz": -5.0,
+
+            "_comment_radius": "Hole radius (mm).",
+            "radius": 1.0,
+
+            "_comment_mu_total": "Total attenuation coefficient INSIDE hole region (usually 0 for vacuum/air).",
+            "mu_total": 0.0,
+
+            "_comment_mu_pe": "Photoelectric attenuation coefficient INSIDE hole region (usually 0).",
+            "mu_pe": 0.0,
+
+            "_comment_mu_compton": "Compton attenuation coefficient INSIDE hole region (usually 0).",
+            "mu_compton": 0.0,
+
+            "_comment_flag": "Hole enable/flag (float). Use 1.0 for active hole; 0.0 to disable.",
+            "flag": 1.0
+          },
+          {
+            "_comment": "Hole 1",
+            "cx": 5.0,
+            "cy1": 0.0,
+            "cy2": 0.0,
+            "cz": -5.0,
+            "radius": 1.0,
+            "mu_total": 0.0,
+            "mu_pe": 0.0,
+            "mu_compton": 0.0,
+            "flag": 1.0
+          },
+          {
+            "_comment": "Hole 2",
+            "cx": -5.0,
+            "cy1": 0.0,
+            "cy2": 0.0,
+            "cz": 5.0,
+            "radius": 1.0,
+            "mu_total": 0.0,
+            "mu_pe": 0.0,
+            "mu_compton": 0.0,
+            "flag": 1.0
+          },
+          {
+            "_comment": "Hole 3",
+            "cx": 5.0,
+            "cy1": 0.0,
+            "cy2": 0.0,
+            "cz": 5.0,
+            "radius": 1.0,
+            "mu_total": 0.0,
+            "mu_pe": 0.0,
+            "mu_compton": 0.0,
+            "flag": 1.0
+          }
+        ]
+      }
+    ]
+  },
+
+  "detector": {
+    "_comment": "Detector bins/crystals. Written into Param_Detector.dat: [numBins] then 12 floats per bin.",
+
+    "_comment_bins": "Array of detector bins. Each bin becomes 12 float32 entries.",
+    "bins": [
+      {
+        "_comment": "Detector bin 0 example.",
+        "_comment_cx": "Detector center X (mm).",
+        "cx": 0.0,
+
+        "_comment_cy": "Detector center Y (mm). README note: set Y of 1st collimator to 0; keep coordinate system consistent.",
+        "cy": 40.0,
+
+        "_comment_cz": "Detector center Z (mm).",
+        "cz": 200.0,
+
+        "_comment_width_mm": "Detector width (mm).",
+        "width_mm": 4.0,
+
+        "_comment_thickness_mm": "Detector thickness (mm).",
+        "thickness_mm": 10.0,
+
+        "_comment_height_mm": "Detector height (mm).",
+        "height_mm": 4.0,
+
+        "_comment_mu_total": "Total linear attenuation coefficient for detector material (excluding Rayleigh per repo note).",
+        "mu_total": 0.30,
+
+        "_comment_mu_pe": "Photoelectric attenuation coefficient for detector material.",
+        "mu_pe": 0.20,
+
+        "_comment_mu_compton": "Compton attenuation coefficient for detector material.",
+        "mu_compton": 0.10,
+
+        "_comment_energy_resolution_at_target": "Energy resolution at target PE energy (repo expects a float; often fractional FWHM like 0.10).",
+        "energy_resolution_at_target": 0.10,
+
+        "_comment_rotation_about_y_rad": "Rotation angle about Y axis in radians, [0, 2π).",
+        "rotation_about_y_rad": 0.0,
+
+        "_comment_flag": "Detector bin enable/flag (float). 1.0 active, 0.0 disabled.",
+        "flag": 1.0
+      }
+    ]
+  },
+
+  "image": {
+    "_comment": "Voxel grid + scan trajectory. Written into Param_Image.dat as 12 float32 values at fixed indices.",
+
+    "_comment_num_voxel_x": "Number of voxels in X dimension.",
+    "num_voxel_x": 64,
+
+    "_comment_num_voxel_y": "Number of voxels in Y dimension.",
+    "num_voxel_y": 64,
+
+    "_comment_num_voxel_z": "Number of voxels in Z dimension.",
+    "num_voxel_z": 32,
+
+    "_comment_voxel_size_x_mm": "Voxel size in X (mm).",
+    "voxel_size_x_mm": 2.0,
+
+    "_comment_voxel_size_y_mm": "Voxel size in Y (mm).",
+    "voxel_size_y_mm": 2.0,
+
+    "_comment_voxel_size_z_mm": "Voxel size in Z (mm).",
+    "voxel_size_z_mm": 2.0,
+
+    "_comment_num_rotation": "Number of projection angles / rotations.",
+    "num_rotation": 60,
+
+    "_comment_angle_per_rotation_rad": "Angular step per rotation in radians. Example: 6 degrees = 0.104719755 rad.",
+    "angle_per_rotation_rad": 0.104719755,
+
+    "_comment_shift_fov_x_mm": "FOV shift in X (mm).",
+    "shift_fov_x_mm": 0.0,
+
+    "_comment_shift_fov_y_mm": "FOV shift in Y (mm).",
+    "shift_fov_y_mm": 0.0,
+
+    "_comment_shift_fov_z_mm": "FOV shift in Z (mm).",
+    "shift_fov_z_mm": 0.0,
+
+    "_comment_fov_to_collimator0_mm": "Distance from FOV to collimator layer 0 (mm).",
+    "fov_to_collimator0_mm": 100.0
+  },
+
+  "physics": {
+    "_comment": "Physics flags + energy window. Written into Param_Physics.dat as 10 float32 values at fixed indices.",
+
+    "_comment_use_compton": "1 to include Compton scatter physics, 0 to disable.",
+    "use_compton": 1,
+
+    "_comment_save_pe_sysmat": "1 to save PE-only system matrix output, 0 otherwise.",
+    "save_pe_sysmat": 1,
+
+    "_comment_save_compton_sysmat": "1 to save Compton-only system matrix output, 0 otherwise.",
+    "save_compton_sysmat": 0,
+
+    "_comment_save_pecompton_sysmat": "1 to save combined PE+Compton system matrix output, 0 otherwise.",
+    "save_pecompton_sysmat": 0,
+
+    "_comment_use_same_energy_window": "1 to use same energy window for PE and Compton, 0 otherwise.",
+    "use_same_energy_window": 1,
+
+    "_comment_energy_window_lower": "Lower threshold of energy window (keV in this example).",
+    "energy_window_lower": 126.0,
+
+    "_comment_energy_window_upper": "Upper threshold of energy window (keV in this example).",
+    "energy_window_upper": 154.0,
+
+    "_comment_target_pe_energy": "Target photopeak energy (keV in this example).",
+    "target_pe_energy": 140.0,
+
+    "_comment_calc_crystal_geometry_relationship": "1 to compute crystal geometry relationship table (if code supports), 0 otherwise.",
+    "calc_crystal_geometry_relationship": 1,
+
+    "_comment_calc_collimator_geometry_relationship": "1 to compute collimator geometry relationship table (if code supports), 0 otherwise.",
+    "calc_collimator_geometry_relationship": 1
+  }
+}
