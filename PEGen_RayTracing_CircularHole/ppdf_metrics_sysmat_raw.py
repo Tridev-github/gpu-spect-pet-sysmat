@@ -255,6 +255,77 @@ def save_3d_png(volume, component_mask, spacing_zyx, analysis_axis_zyx, png_path
     plt.close(fig)
 
 
+def save_ppdf_png(volume, png_path, title="PPDF", spacing_zyx=(1.0, 1.0, 1.0)):
+    """
+    Save a 2D PNG summary of a 3D PPDF volume:
+      - top row: max-intensity projections (XY, XZ, YZ)
+      - bottom row: central slices (XY, XZ, YZ)
+
+    volume shape: (nz, ny, nx)
+    spacing_zyx: (sz, sy, sx) in mm
+    """
+    vol = np.asarray(volume, dtype=float)
+    vol = np.maximum(vol, 0.0)
+
+    if vol.max() > 0:
+        vol = vol / vol.max()
+
+    nz, ny, nx = vol.shape
+    sz, sy, sx = spacing_zyx
+
+    mip_xy = vol.max(axis=0)   # (ny, nx)
+    mip_xz = vol.max(axis=1)   # (nz, nx)
+    mip_yz = vol.max(axis=2)   # (nz, ny)
+
+    cz, cy, cx = nz // 2, ny // 2, nx // 2
+    sl_xy = vol[cz, :, :]      # (ny, nx)
+    sl_xz = vol[:, cy, :]      # (nz, nx)
+    sl_yz = vol[:, :, cx]      # (nz, ny)
+
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+
+    im0 = axes[0, 0].imshow(mip_xy, origin="lower", aspect=(sx / sy))
+    axes[0, 0].set_title("MIP XY")
+    axes[0, 0].set_xlabel("x")
+    axes[0, 0].set_ylabel("y")
+    fig.colorbar(im0, ax=axes[0, 0], fraction=0.046, pad=0.04)
+
+    im1 = axes[0, 1].imshow(mip_xz, origin="lower", aspect=(sx / sz))
+    axes[0, 1].set_title("MIP XZ")
+    axes[0, 1].set_xlabel("x")
+    axes[0, 1].set_ylabel("z")
+    fig.colorbar(im1, ax=axes[0, 1], fraction=0.046, pad=0.04)
+
+    im2 = axes[0, 2].imshow(mip_yz.T, origin="lower", aspect=(sy / sz))
+    axes[0, 2].set_title("MIP YZ")
+    axes[0, 2].set_xlabel("y")
+    axes[0, 2].set_ylabel("z")
+    fig.colorbar(im2, ax=axes[0, 2], fraction=0.046, pad=0.04)
+
+    im3 = axes[1, 0].imshow(sl_xy, origin="lower", aspect=(sx / sy))
+    axes[1, 0].set_title(f"Central slice XY (z={cz})")
+    axes[1, 0].set_xlabel("x")
+    axes[1, 0].set_ylabel("y")
+    fig.colorbar(im3, ax=axes[1, 0], fraction=0.046, pad=0.04)
+
+    im4 = axes[1, 1].imshow(sl_xz, origin="lower", aspect=(sx / sz))
+    axes[1, 1].set_title(f"Central slice XZ (y={cy})")
+    axes[1, 1].set_xlabel("x")
+    axes[1, 1].set_ylabel("z")
+    fig.colorbar(im4, ax=axes[1, 1], fraction=0.046, pad=0.04)
+
+    im5 = axes[1, 2].imshow(sl_yz.T, origin="lower", aspect=(sy / sz))
+    axes[1, 2].set_title(f"Central slice YZ (x={cx})")
+    axes[1, 2].set_xlabel("y")
+    axes[1, 2].set_ylabel("z")
+    fig.colorbar(im5, ax=axes[1, 2], fraction=0.046, pad=0.04)
+
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(png_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
 def save_population_histograms(metrics, png_path):
     if not metrics:
         return
@@ -342,6 +413,16 @@ def main():
         )
 
         vol = normalize_volume(vol)
+
+        # Save full row PPDF PNG
+        row_base = output_dir / f"row_{row_idx:04d}"
+        save_ppdf_png(
+            vol,
+            png_path=row_base.with_name(row_base.name + "_ppdf.png"),
+            title=f"Row {row_idx} PPDF",
+            spacing_zyx=spacing,
+        )
+
         labels, ncomp = choose_components(
             vol,
             support_threshold_fraction=args.support_threshold_fraction,
@@ -365,6 +446,15 @@ def main():
             all_metrics.append(metrics)
 
             base = output_dir / f"row_{row_idx:04d}_comp_{cid:02d}"
+
+            # Save component-only PPDF PNG
+            comp_only = vol * comp_mask.astype(float)
+            save_ppdf_png(
+                comp_only,
+                png_path=base.with_name(base.name + "_ppdf.png"),
+                title=f"Row {row_idx} | Component {cid} PPDF",
+                spacing_zyx=spacing,
+            )
 
             save_3d_png(
                 vol,
