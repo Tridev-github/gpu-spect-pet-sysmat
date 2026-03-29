@@ -111,7 +111,7 @@ def save_slice_panel(mpxi_3d, save_path, rot_idx):
     ]
 
     for ax, (img, title) in zip(axes, items):
-        im = ax.imshow(img.T, origin="lower", aspect="auto")
+        im = ax.imshow(img.T, origin="lower", aspect="auto", cmap="viridis")
         ax.set_title(title)
         ax.set_xlabel("Voxel index")
         ax.set_ylabel("Voxel index")
@@ -137,7 +137,7 @@ def save_mip_panel(mpxi_3d, save_path, rot_idx):
     ]
 
     for ax, (img, title) in zip(axes, items):
-        im = ax.imshow(img.T, origin="lower", aspect="auto")
+        im = ax.imshow(img.T, origin="lower", aspect="auto", cmap="viridis")
         ax.set_title(title)
         ax.set_xlabel("Voxel index")
         ax.set_ylabel("Voxel index")
@@ -169,7 +169,7 @@ def save_nonzero_histogram_plot(mpxi_3d, save_path, rot_idx):
     vals = vals[vals > 0]
 
     if vals.size == 0:
-        print(f"Skipping nonzero histogram: no sampled voxels.")
+        print("Skipping nonzero histogram: no sampled voxels.")
         return
 
     unique_vals, counts = np.unique(vals, return_counts=True)
@@ -190,6 +190,143 @@ def save_h5_volume(mpxi_3d, save_path, rot_idx):
         f.create_dataset("mpxi_3d", data=mpxi_3d, dtype=np.uint32)
         f.attrs["rotation_index"] = int(rot_idx)
         f.attrs["definition"] = "MPXI(voxel) = number of detector-beam masks covering that voxel for the given rotation"
+
+
+# ============================================================
+# NEW: 3D RENDER-LIKE VIEW (closer to your attached image)
+# ============================================================
+def save_3d_render_like_view(mpxi_3d, save_path, rot_idx):
+    """
+    Pseudo-volume-render style visualization using many translucent contour
+    slices along X, Y, and Z. This looks much closer to the attached image
+    than a simple voxel plot.
+    """
+
+    from matplotlib import cm, colors
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
+    vals = mpxi_3d.astype(np.float32)
+
+    if np.max(vals) <= 0:
+        print(f"Skipping 3D render-like view for rotation {rot_idx}: all zeros.")
+        return
+
+    # --------------------------------------------------------
+    # Physical coordinates in mm
+    # 16 voxels * 8 mm = 128 mm field width
+    # centered at 0 => [-64, 64]
+    # --------------------------------------------------------
+    nx, ny, nz = vals.shape
+    x = np.linspace(-64, 64, nx)
+    y = np.linspace(-64, 64, ny)
+    z = np.linspace(-64, 64, nz)
+
+    X, Y = np.meshgrid(x, y, indexing="ij")
+    Xz, Zx = np.meshgrid(x, z, indexing="ij")
+    Yz, Zy = np.meshgrid(y, z, indexing="ij")
+
+    # --------------------------------------------------------
+    # Normalize
+    # --------------------------------------------------------
+    nonzero = vals[vals > 0]
+    vmin = float(np.min(nonzero)) if nonzero.size > 0 else 0.0
+    vmax = float(np.max(vals))
+
+    norm = colors.Normalize(vmin=vmin, vmax=vmax)
+    cmap = cm.viridis
+
+    fig = plt.figure(figsize=(8, 7))
+    ax = fig.add_subplot(111, projection="3d")
+
+    # --------------------------------------------------------
+    # Use several contour levels for smoother filled rendering
+    # --------------------------------------------------------
+    nlevels = 10
+    levels = np.linspace(vmin, vmax, nlevels)
+
+    # choose multiple translucent slices in each direction
+    slice_ids = [1, 3, 5, 7, 9, 11, 13, 15]
+
+    # Z-oriented slices (XY planes)
+    for k in slice_ids:
+        plane = vals[:, :, k]
+        if np.max(plane) <= 0:
+            continue
+        ax.contourf(
+            X, Y, plane,
+            zdir='z',
+            offset=z[k],
+            levels=levels,
+            cmap=cmap,
+            alpha=0.10
+        )
+
+    # X-oriented slices (YZ planes)
+    for i in slice_ids:
+        plane = vals[i, :, :].T
+        if np.max(plane) <= 0:
+            continue
+        ax.contourf(
+            plane,
+            Yz, Zy,
+            zdir='x',
+            offset=x[i],
+            levels=levels,
+            cmap=cmap,
+            alpha=0.08
+        )
+
+    # Y-oriented slices (XZ planes)
+    for j in slice_ids:
+        plane = vals[:, j, :]
+        if np.max(plane) <= 0:
+            continue
+        ax.contourf(
+            Xz, plane, Zx,
+            zdir='y',
+            offset=y[j],
+            levels=levels,
+            cmap=cmap,
+            alpha=0.08
+        )
+
+    # --------------------------------------------------------
+    # Frame / limits / labels
+    # --------------------------------------------------------
+    ax.set_xlim(-64, 64)
+    ax.set_ylim(-64, 64)
+    ax.set_zlim(-64, 64)
+
+    ax.set_xlabel("X (mm)")
+    ax.set_ylabel("Y (mm)")
+    ax.set_zlabel("Z (mm)")
+    ax.set_title(f"3D MPXI Volume Render-Like View | Rotation {rot_idx}")
+
+    try:
+        ax.set_box_aspect((1, 1, 1))
+    except Exception:
+        pass
+
+    # closer to your attached viewpoint
+    ax.view_init(elev=20, azim=35)
+
+    # soften pane backgrounds a bit
+    try:
+        ax.xaxis.pane.set_alpha(0.04)
+        ax.yaxis.pane.set_alpha(0.04)
+        ax.zaxis.pane.set_alpha(0.04)
+    except Exception:
+        pass
+
+    # colorbar
+    mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
+    mappable.set_array(vals)
+    cbar = plt.colorbar(mappable, ax=ax, shrink=0.72, pad=0.08)
+    cbar.set_label("MPXI value")
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=220)
+    plt.close(fig)
 
 
 # ============================================================
@@ -231,6 +368,7 @@ def main():
             mip_path = os.path.join(args.outdir, f"{base}_mips.png")
             hist_path = os.path.join(args.outdir, f"{base}_hist_all.png")
             hist_nonzero_path = os.path.join(args.outdir, f"{base}_hist_nonzero.png")
+            render3d_path = os.path.join(args.outdir, f"{base}_3d_render.png")
 
             np.save(npy_path, mpxi_3d)
             save_h5_volume(mpxi_3d, h5_path, rot_idx)
@@ -239,8 +377,9 @@ def main():
             save_mip_panel(mpxi_3d, mip_path, rot_idx)
             save_histogram_plot(mpxi_3d, hist_path, rot_idx)
             save_nonzero_histogram_plot(mpxi_3d, hist_nonzero_path, rot_idx)
+            save_3d_render_like_view(mpxi_3d, render3d_path, rot_idx)
 
-            print(f"Saved:")
+            print("Saved:")
             print(f"  {npy_path}")
             print(f"  {h5_path}")
             print(f"  {txt_path}")
@@ -248,6 +387,7 @@ def main():
             print(f"  {mip_path}")
             print(f"  {hist_path}")
             print(f"  {hist_nonzero_path}")
+            print(f"  {render3d_path}")
 
     print("Done.")
 
